@@ -26,5 +26,8 @@ exit
 3. Install dependencies
 
 ```bash
-poetry install
+poetry install --no-root
 ```
+
+*************
+
