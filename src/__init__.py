@@ -1,5 +1,6 @@
 from flask import Flask
 from .models.users import users_blueprint
+from .extensions import init_extensions
 
 def create_app(config_name):
     app = Flask(__name__)
@@ -8,6 +9,8 @@ def create_app(config_name):
     app.config.from_object(config_name)
 
     # Initialize extensions
+    init_extensions(app)
+
     # db.init_app(app)
     # migrate.init_app(app, db)
 
