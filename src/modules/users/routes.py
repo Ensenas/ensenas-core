@@ -4,23 +4,23 @@ from ...models.user import User
 from ...schemas.user import UserSchema
 
 user_blueprint = Blueprint('user', __name__)
-product_schema = ProductSchema()
-products_schema = ProductSchema(many=True)
+user_schema = UserSchema()
+users_schema = UserSchema(many=True)
 
 @user_blueprint.route('/', methods=['POST'])
-def add_product():
+def add_user():
     data = request.get_json()
     try:
-        product = product_schema.load(data)
+        user = user_schema.load(data)
     except ValidationError as err:
         return jsonify(err.messages), 400
 
-    db.session.add(product)
+    db.session.add(user)
     db.session.commit()
 
-    return product_schema.dump(product), 201
+    return users_schema.dump(user), 201
 
-@product_blueprint.route('/', methods=['GET'])
-def get_products():
-    products = Product.query.all()
-    return jsonify(products_schema.dump(products))
+@user_blueprint.route('/', methods=['GET'])
+def get_users():
+    users = User.query.all()
+    return jsonify(users_schema.dump(users))
