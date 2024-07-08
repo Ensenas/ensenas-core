@@ -4,7 +4,7 @@ from PIL import Image
 from src.ensenias_api import app
 
 
-class FlaskTestCase(unittest.TestCase):
+class APIImageTestCase(unittest.TestCase):
 
     def setUp(self):
         self.app = app.test_client()
@@ -37,6 +37,49 @@ class FlaskTestCase(unittest.TestCase):
         data = response.get_json()
         self.assertIn("error", data)
         self.assertEqual(data["error"], "No image part in the request")
+
+class APIVideoTestCase(unittest.TestCase):
+
+    def setUp(self):
+        self.app = app.test_client()
+        self.app.testing = True
+
+    def create_test_video(self):
+        video_io = BytesIO(b"this is a test video file")
+        video_io.seek(0)
+        return video_io
+
+    def test_upload_video_success(self):
+        video = self.create_test_video()
+        response = self.app.post('/video', data={'video': (video, 'test.mp4')})
+
+        self.assertEqual(response.status_code, 200)
+        data = response.get_json()
+        self.assertIn('filename', data)
+        self.assertIn('size', data)
+
+    def test_no_video_part(self):
+        response = self.app.post('/video', data={})
+        self.assertEqual(response.status_code, 400)
+        data = response.get_json()
+        self.assertIn('error', data)
+        self.assertEqual(data['error'], 'No video in the request')
+
+    def test_no_video_selected(self):
+        response = self.app.post('/video', data={'video': (BytesIO(), '')})
+        self.assertEqual(response.status_code, 400)
+        data = response.get_json()
+        self.assertIn('error', data)
+        self.assertEqual(data['error'], 'No video in the request')
+
+    def test_invalid_video_format(self):
+        video_io = BytesIO(b"this is not a video")
+        response = self.app.post('/video', data={'video': (video_io, 'test.txt')})
+
+        self.assertEqual(response.status_code, 400)
+        data = response.get_json()
+        self.assertIn('error', data)
+        self.assertEqual(data['error'], 'File type not allowed')
 
 
 if __name__ == "__main__":
