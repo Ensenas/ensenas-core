@@ -3,7 +3,7 @@ import os
 import cv2
 import numpy as np
 from modelo_ia import SignLanguageModel
-from image_processing import process_frame
+from image_processing import process_frame_roi
 
 # Inicializa el modelo de IA
 model_path = './model.keras'
@@ -27,7 +27,7 @@ if __name__ == "__main__":
         clone = frame.copy()
         
         # Frame Processing
-        processed_frame, letra = process_frame(clone, top, right, bottom, left, sign_model)
+        processed_frame, letra = process_frame_roi(clone, top, right, bottom, left, sign_model)
         
         num_frames += 1
         cv2.imshow("Video Feed", processed_frame)
