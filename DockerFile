@@ -1,0 +1,24 @@
+FROM python:3.12.4-slim as build
+
+WORKDIR /app
+
+COPY src/requirements.txt .
+RUN pip install --user -r requirements.txt
+
+
+
+FROM python:3.12.4-slim as build
+
+WORKDIR /app
+COPY src/ .
+
+RUN useradd -ms /bin/bash ensenias \
+    && chown -R ensenias:ensenias /app
+USER ensenias
+
+COPY --from=build /root/.local /home/ensenias/.local
+ENV PATH=/home/ensenias/.local/bin:$PATH
+
+EXPOSE 5000
+
+ENTRYPOINT ["python", "api.py"]
