@@ -1,6 +1,6 @@
 name: Python Ensinas Core API
 
-on: push
+on: pull_request
 
 jobs:
   build:
