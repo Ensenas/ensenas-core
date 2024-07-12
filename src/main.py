@@ -1,196 +1,144 @@
-# -------------------------------------------
-# SEGMENT HAND REGION FROM A VIDEO SEQUENCE
-# -------------------------------------------
-# from keras.models import load_model
-
-# Solo para vgg
-
-from tensorflow.keras.models import load_model
-import h5py
-import os
-from time import sleep
-import cv2
+# Import necessary libraries
 import numpy as np
+import os
+import string
+import mediapipe as mp
+import cv2
+from my_functions import *
+import keyboard
+from tensorflow.keras.models import load_model
+import language_tool_python
 
-# vgg
-model_path = './model.keras'
-model = load_model(model_path)
+# Set the path to the data directory
+PATH = os.path.join('new_data')
 
-# global variables
-bg = None
+# Create an array of action labels by listing the contents of the data directory
+actions = np.array(os.listdir(PATH))
 
+# Load the trained model
+model = load_model('my_model.keras')
 
-# --------------------------------------------------
-# To find the running average over the background
-# --------------------------------------------------
-def run_avg(image, aWeight):
-    global bg
-    # initialize the background
-    if bg is None:
-        bg = image.copy().astype("float")
-        return
+# Create an instance of the grammar correction tool
+tool = language_tool_python.LanguageToolPublicAPI('es-AR')
 
-    # compute weighted average, accumulate it and update the background
-    cv2.accumulateWeighted(image, bg, aWeight)
+# Initialize the lists
+sentence, keypoints, last_prediction, grammar, grammar_result = [], [], [], [], []
 
+# Variable to store the previous set of keypoints
+previous_keypoints = None
 
-# ---------------------------------------------
-# To segment the region of hand in the image
-# ---------------------------------------------
-def segment(image, threshold=25):
-    global bg
-    # find the absolute difference between background and current frame
-    diff = cv2.absdiff(bg.astype("uint8"), image)
+# Access the camera and check if the camera is opened successfully
+cap = cv2.VideoCapture(0)
+if not cap.isOpened():
+    print("Cannot access camera.")
+    exit()
 
-    # threshold the diff image so that we get the foreground
-    thresholded = cv2.threshold(diff, threshold, 255, cv2.THRESH_BINARY)[1]
+# Create a holistic object for sign prediction
+with mp.solutions.holistic.Holistic(min_detection_confidence=0.75, min_tracking_confidence=0.75) as holistic:
+    # Run the loop while the camera is open
+    while cap.isOpened():
+        # Read a frame from the camera
+        _, image = cap.read()
+        image = image.copy()
+        # Process the image and obtain sign landmarks using image_process function from my_functions.py
+        results = image_process(image, holistic)
+        image = image.copy()
 
-    # get the contours in the thresholded image
-    (_, cnts, _) = cv2.findContours(thresholded.copy(), cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+        # Draw the sign landmarks on the image using draw_landmarks function from my_functions.py
+        draw_landmarks(image, results)
+        image = image.copy()
 
-    # return None, if no contours detected
-    if len(cnts) == 0:
-        return
-    else:
-        # based on contour area, get the maximum contour which is the hand
-        segmented = max(cnts, key=cv2.contourArea)
-        return (thresholded, segmented)
+        # Extract keypoints from the pose landmarks using keypoint_extraction function from my_functions.py
+        current_keypoints = keypoint_extraction(results)
 
+        # If previous keypoints are not None, compare with current keypoints
+        if previous_keypoints is not None:
+            # Calculate the difference between the current and previous keypoints
+            keypoint_diff = np.linalg.norm(np.array(current_keypoints) - np.array(previous_keypoints))
+            # Define a threshold for significant movement
+            keypoints.append(current_keypoints)
 
-# -----------------
-# MAIN FUNCTION
-# -----------------
-if __name__ == "__main__":
-    # initialize weight for running average
-    aWeight = 0.5
+        # Update the previous keypoints
+        previous_keypoints = current_keypoints
 
-    # get the reference to the webcam
-    camera = cv2.VideoCapture(0)
+        # Check if 10 frames have been accumulated
+        if len(keypoints) == 40:
+            # Convert keypoints list to a numpy array
+            keypoints = np.array(keypoints)
+            # Make a prediction on the keypoints using the loaded model
+            prediction = model.predict(keypoints[np.newaxis, :, :])
+            # Clear the keypoints list for the next set of frames
+            keypoints = []
 
-    # region of interest (ROI) coordinates
-    top, right, bottom, left = 50, 50, 200, 200
-    # initialize num of frames
-    num_frames = 0
+            # Check if the maximum prediction value is above 0.9
+            if np.amax(prediction) > 0.9:
+                # Check if the predicted sign is different from the previously predicted sign
+                if last_prediction != actions[np.argmax(prediction)]:
+                    # Append the predicted sign to the sentence list
+                    sentence.append(actions[np.argmax(prediction)])
+                    # Record a new prediction to use it on the next cycle
+                    last_prediction = actions[np.argmax(prediction)]
 
-    #
-    #
-    lista = os.listdir('Signos_ASL')
-    #    while(True):
-    #        for i in range(24):
-    #            print(type(lista[i]))
-    #            letrica = cv2.imread('Signos_ASL/'+ lista[i])
-    #            cv2.imshow("LETRA", letrica)
-    #            sleep(5)
-    #        keypress1 = cv2.waitKey(1) & 0xFF
-    #        if keypress1 == ord("w"):
-    #            break
-    #
-    #
+        # Limit the sentence length to 7 elements to make sure it fits on the screen
+        if len(sentence) > 7:
+            sentence = sentence[-7:]
 
-    # keep looping, until interrupted
-    while (True):
-        # get the current frame
-        (grabbed, frame) = camera.read()
+        # Reset if the "Spacebar" is pressed
+        if keyboard.is_pressed(' '):
+            sentence, keypoints, last_prediction, grammar, grammar_result = [], [], [], [], []
 
-        # resize the frame
-        # frame = imutils.resize(frame, width=700)
+        # Check if the list is not empty
+        if sentence:
+            # Capitalize the first word of the sentence
+            sentence[0] = sentence[0].capitalize()
 
-        # flip the frame so that it is not the mirror view
-        frame = cv2.flip(frame, 1)
+        # Check if the sentence has at least two elements
+        if len(sentence) >= 2:
+            # Check if the last element of the sentence belongs to the alphabet (lower or upper cases)
+            if sentence[-1] in string.ascii_lowercase or sentence[-1] in string.ascii_uppercase:
+                # Check if the second last element of sentence belongs to the alphabet or is a new word
+                if sentence[-2] in string.ascii_lowercase or sentence[-2] in string.ascii_uppercase or (sentence[-2] not in actions and sentence[-2] not in list(x.capitalize() for x in actions)):
+                    # Combine last two elements
+                    sentence[-1] = sentence[-2] + sentence[-1]
+                    sentence.pop(len(sentence) - 2)
+                    sentence[-1] = sentence[-1].capitalize()
 
-        # clone the frame
-        clone = frame.copy()
+        # Perform grammar check if "Enter" is pressed
+        if keyboard.is_pressed('enter'):
+            # Record the words in the sentence list into a single string
+            text = ' '.join(sentence)
+            # Apply grammar correction tool and extract the corrected result
+            grammar_result = tool.correct(text)
 
-        # get the height and width of the frame
-        (height, width) = frame.shape[:2]
+        if grammar_result:
+            # Calculate the size of the text to be displayed and the X coordinate for centering the text on the image
+            textsize = cv2.getTextSize(grammar_result, cv2.FONT_HERSHEY_SIMPLEX, 1, 2)[0]
+            text_X_coord = (image.shape[1] - textsize[0]) // 2
 
-        # get the ROI
-        roi = frame[top:bottom, right:left]
+            # Draw the sentence on the image
+            cv2.putText(image, grammar_result, (text_X_coord, 470),
+                        cv2.FONT_HERSHEY_SIMPLEX, 1, (255, 255, 255), 2, cv2.LINE_AA)
+        else:
+            # Calculate the size of the text to be displayed and the X coordinate for centering the text on the image
+            textsize = cv2.getTextSize(' '.join(sentence), cv2.FONT_HERSHEY_SIMPLEX, 1, 2)[0]
+            text_X_coord = (image.shape[1] - textsize[0]) // 2
 
-        # convert the roi to grayscale and blur it
+            # Draw the sentence on the image
+            cv2.putText(image, ' '.join(sentence), (text_X_coord, 470),
+                        cv2.FONT_HERSHEY_SIMPLEX, 1, (255, 255, 255), 2, cv2.LINE_AA)
 
-        # SOlO para vgg que no sean imagenes grises
-        gray = roi
+        # Show the image on the display
+        cv2.imshow('Camera', image)
 
-        # Para los demas si tienen que ser grises
-        # gray = cv2.cvtColor(roi, cv2.COLOR_BGR2GRAY)
+        cv2.waitKey(1)
 
-        #        gray = cv2.GaussianBlur(gray, (7, 7), 0)
-
-        k = 2
-        resized = cv2.resize(roi, (28 * k, 28 * k), interpolation=cv2.INTER_AREA) / 255
-
-        # to get the background, keep looking till a threshold is reached
-        # so that our running average model gets calibrated
-
-        #            keypress1 = cv2.waitKey(1) & 0xFF
-        #            if keypress1 == ord("w"):
-
-        #                cv2.imshow("Letra", cv2.imread('Signos_ASL/'+ lista[i]))
-
-        #               IMPORTANTE: roi es el cuadradito.
-
-        #       Prediccion del modelo
-
-        pred = model.predict(resized.reshape(-1, 28 * k, 28 * k, 3))
-        #        b=np.argmax(b)
-        abc = 'ABCDEFGHIKLMNOPQRSTUVWXY'
-
-        #        x = np.array([4,6,7,3, 1, 8])
-        index = np.argsort(pred)
-        #        print(index)
-
-        # Los tres ultimos
-        tres = index[-3:][0]
-        l3 = abc[tres[0]]
-        l2 = abc[tres[1]]
-        l1 = abc[tres[2]]
-        #        # Letra correcta:
-        #        index[-1]
-
-        # cv.imshow
-
-        letra = abc[np.argmax(pred)]
-        # draw the segmented hand
-        cv2.rectangle(clone, (left, top), (right, bottom), (0, 255, 0), 2)
-        cv2.putText(clone, letra, (left - 90, top - 10), cv2.FONT_HERSHEY_SIMPLEX, 0.9, (0, 255, 0), 2)
-        #        Las de abajo
-        cv2.putText(clone, l2, (left - 150, top + 190), cv2.FONT_HERSHEY_SIMPLEX, 0.9, (255, 255, 255), 2)
-        cv2.putText(clone, l3, (left - 10, top + 190), cv2.FONT_HERSHEY_SIMPLEX, 0.9, (255, 255, 255), 2)
-        # increment the number of frames
-        num_frames += 1
-
-        # display the frame with segmented hand
-        cv2.imshow("Video Feed", clone)
-
-        #        cv2.imshow("Video Feed", cv2.imread('Signos_ASL/A.jpg'))
-
-        #        Imagen de los signos
-        #        cv2.imshow("Signos", '.jpg')
-        # observe the keypress by the user
-
-        keypress2 = cv2.waitKey(1)
-        if keypress2 == ord(" "):
-            letrica = lista[np.random.randint(24)]
-            letraimagen = cv2.imread('Signos_ASL/' + letrica)
-            #            cv2.imshow("Letra", letraimagen)
-            cloneletrica = letraimagen.copy()
-            #            cv2.putText(cloneletrica, letrica, (left-100, top+50), cv2.FONT_HERSHEY_SIMPLEX, 0.9, (255,255,255), 2)
-
-            # Using cv2.putText() method
-            letraimagen = cv2.putText(letraimagen, str(letrica[0]), (10, 50), cv2.FONT_HERSHEY_SIMPLEX, 2,
-                                      (226, 43, 138), 2, cv2.LINE_AA)
-
-            # Displaying the image
-            cv2.imshow("Letra", letraimagen)
-            #    sleep(5)
-
-        # if the user pressed "q", then stop looping
-
-        keypress = cv2.waitKey(1)
-        if keypress == ord("q"):
+        # Check if the 'Camera' window was closed and break the loop
+        if cv2.getWindowProperty('Camera', cv2.WND_PROP_VISIBLE) < 1:
             break
 
-# free up memory
-camera.release()
-cv2.destroyAllWindows()
+    # Release the camera and close all windows
+    cap.release()
+    cv2.destroyAllWindows()
+
+    # Shut off the server
+    tool.close()
