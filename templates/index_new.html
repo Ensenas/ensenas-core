@@ -1,0 +1,248 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Video Stream Remoto</title>
+    <style>
+        #image-container {
+            position: relative;
+            width: 100%;
+            height: auto;
+            margin-top: 0;
+        }
+
+        #localVideo {
+            position: absolute;
+            top: 10px;
+            left: 10px;
+            width: 200px;
+            height: auto;
+            border: 2px solid #000;
+        }
+
+        #local-video-label {
+            position: absolute;
+            top: 220px; /* Coloca debajo del video */
+            left: 10px;
+            font-size: 14px;
+            color: #000;
+            margin-top: 0;
+        }
+
+        #selectors-container {
+            position: absolute;
+            left: 10px;
+            top: 240px;
+            background-color: rgba(255, 255, 255, 0.8);
+            padding: 10px;
+            border-radius: 8px;
+            margin-top: 0;
+        }
+
+        #output {
+            display: block;
+            margin: 0 auto 0;
+            width: 80%;
+            height: auto;
+            border: 2px solid #000;
+        }
+
+        h1 {
+            text-align: center;
+        }
+
+        #fpsDisplay {
+            position: absolute;
+            top: 10px;
+            right: 10px;
+            font-size: 18px;
+            color: #333;
+        }
+    </style>
+</head>
+<body>
+    <h1>Video Stream Remoto</h1>
+    <div id="fpsDisplay"></div>
+
+    <div id="image-container">
+        <video id="localVideo" autoplay playsinline></video>
+        <div id="local-video-label">Local Video Stream</div>
+        <div id="selectors-container">
+            <select id="unit-selector">
+                <option value="familiares">Familiares</option>
+                <option value="colores">Colores</option>
+                <!-- Añade más opciones según sea necesario -->
+            </select>
+            <select id="mode-selector">
+                <option value="Detectar">Detectar</option>
+                <option value="Corregir">Corregir</option>
+            </select>
+            <select id="correction-options" style="display:none;">
+                <!-- Las opciones se rellenarán dinámicamente -->
+            </select>
+        </div>
+    </div>
+
+    <canvas id="processedVideo" style="display:none;"></canvas>
+    <img id="output" alt="Processed Video Stream">
+    <div id="resolution"></div>
+
+    <script src="https://cdn.socket.io/4.0.0/socket.io.min.js"></script>
+    <script>
+        const unitWords = {
+            familiares: ['papa', 'mama', 'hijo', 'hermana'],
+            colores: ['amarillo', 'negro', 'rojo', 'verde']
+            // Añade más unidades y palabras según sea necesario
+        };
+
+        function updateWordsForUnit(unit) {
+            const correctionOptions = document.getElementById('correction-options');
+            correctionOptions.innerHTML = ''; // Limpiar las opciones actuales
+
+            // Añadir las nuevas opciones según la unidad seleccionada
+            unitWords[unit].forEach(word => {
+                const option = document.createElement('option');
+                option.value = word;
+                option.textContent = word;
+                correctionOptions.appendChild(option);
+            });
+        }
+
+        document.getElementById('unit-selector').addEventListener('change', function() {
+            const selectedUnit = this.value;
+            socket.emit('unit_selected', { unidad: selectedUnit });
+            updateWordsForUnit(selectedUnit); // Actualizar las palabras para la unidad seleccionada
+        });
+
+        document.getElementById('mode-selector').addEventListener('change', function() {
+            toggleCorrectionOptions(); // Actualiza la visibilidad de las opciones
+            const mode = this.value;
+            if (mode === 'Corregir') {
+                startCorrection();
+            } else if (mode === 'Detectar') {
+                startDetection();
+            }
+        });
+
+        document.addEventListener('DOMContentLoaded', function() {
+            const initialUnit = document.getElementById('unit-selector').value;
+            updateWordsForUnit(initialUnit); // Actualizar las palabras para la unidad seleccionada
+            toggleCorrectionOptions(); // Inicializar la visibilidad correcta de las opciones
+        });
+        const socket = io('wss://alarma.mywire.org:3051');
+        let mode = 'Detectar';  // Valor inicial, puede cambiarse a 'Corregir' según la selección
+
+        function toggleCorrectionOptions() {
+            const modeSelector = document.getElementById('mode-selector');
+            const correctionOptions = document.getElementById('correction-options');
+
+            if (modeSelector.value === 'Corregir') {
+                correctionOptions.style.display = 'block';
+            } else {
+                correctionOptions.style.display = 'none';
+            }
+        }
+
+        function startDetection() {
+            mode = 'Detectar';  // Establece el modo en 'Detectar'
+            socket.emit('reset_text')
+        }
+
+        function startCorrection() {
+            mode = 'Corregir';  // Establece el modo en 'Corregir'
+            socket.emit('reset_text')
+        }
+        document.getElementById('mode-selector').addEventListener('change', function() {
+            toggleCorrectionOptions(); // Actualiza la visibilidad de las opciones
+            const mode = this.value;
+            if (mode === 'Corregir') {
+                startCorrection();
+            } else if (mode === 'Detectar') {
+                startDetection();
+            }
+        });
+
+        document.getElementById('correction-options').addEventListener('change', function() {
+            startCorrection(); // Llamar a la corrección cuando se cambie la palabra seleccionada
+        });
+
+        // Inicialización para asegurarse de que las opciones correctas estén visibles al cargar la página
+        toggleCorrectionOptions();
+
+        const video = document.getElementById('localVideo');
+        const output = document.getElementById('output');
+        const canvas = document.getElementById('processedVideo');
+        const context = canvas.getContext('2d');
+        const resolutionDisplay = document.getElementById('resolution');
+
+        // Solicitar acceso a la cámara con una resolución de 1080p
+        navigator.mediaDevices.getUserMedia({ 
+            video: { 
+                //width: { ideal: 1920 },
+                //height: { ideal: 1080 }
+                width: { ideal: 1280 },
+                height: { ideal: 720 }
+                
+            } 
+        })
+        .then(stream => {
+            video.srcObject = stream;
+            video.play();
+
+            video.onloadedmetadata = () => {
+                resolutionDisplay.textContent = `Resolución: ${video.videoWidth}x${video.videoHeight}`;
+            };
+
+            setInterval(() => {
+                canvas.width = video.videoWidth;
+                canvas.height = video.videoHeight;
+                context.drawImage(video, 0, 0, video.videoWidth, video.videoHeight);
+
+                const dataURL = canvas.toDataURL('image/jpeg', 0.5); // Compresión al 50%
+                if (mode === 'Detectar') {
+                    // Enviar imagen al evento 'video_frame'
+                    socket.emit('video_frame', { image: dataURL });
+                } else if (mode === 'Corregir') {
+                    // Obtener la palabra seleccionada
+                    const selectedWord = document.getElementById('correction-options').value;
+                    // Enviar imagen y palabra al evento 'corregir_video_stream'
+                    socket.emit('corregir_video_stream', { palabra: selectedWord, image: dataURL });
+                }
+            }, 250); // Intervalo de 250ms entre cuadros
+
+            socket.on('processed_frame', (data) => {
+                // Actualizar el FPS en la pantalla
+                document.getElementById('fpsDisplay').textContent = `FPS Max: ${(1 / data.total_time_time).toFixed(2)}`;
+                const img = new Image();
+                img.onload = () => {
+                    const tempCanvas = document.createElement('canvas');
+                    const tempContext = tempCanvas.getContext('2d');
+                    tempCanvas.width = 1280;
+                    tempCanvas.height = 720;
+                    tempContext.drawImage(img, 0, 0, tempCanvas.width, tempCanvas.height);
+                    output.src = tempCanvas.toDataURL('image/jpeg');
+                };
+                img.src = data.image;
+            });
+
+            socket.on('connect', () => {
+                console.log('Conexión con el servidor establecida');
+            });
+
+            socket.on('disconnect', (reason) => {
+                console.log('Conexión con el servidor interrumpida:', reason);
+            });
+
+            document.addEventListener('keydown', (event) => {
+                if (event.code === 'Space') {
+                    socket.emit('reset_text');
+                }
+            });
+        })
+        .catch(error => {
+            console.error('Error accessing webcam:', error);
+        });
+    </script>
+</body>
+</html>
