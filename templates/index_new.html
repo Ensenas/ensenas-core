@@ -72,6 +72,9 @@
             <select id="unit-selector">
                 <option value="familiares">Familiares</option>
                 <option value="colores">Colores</option>
+                <option value="pronombres">Pronombres</option>
+                <option value="frases">Frases</option>
+
                 <!-- Añade más opciones según sea necesario -->
             </select>
             <select id="mode-selector">
@@ -81,6 +84,7 @@
             <select id="correction-options" style="display:none;">
                 <!-- Las opciones se rellenarán dinámicamente -->
             </select>
+
         </div>
     </div>
 
@@ -92,7 +96,8 @@
     <script>
         const unitWords = {
             familiares: ['papa', 'mama', 'hijo', 'hermana'],
-            colores: ['amarillo', 'negro', 'rojo', 'verde']
+            colores: ['amarillo', 'negro', 'rojo', 'verde'],
+            pronombres:['yo', 'vos', 'el-ella', 'nosotros', 'ustedes', 'yo vos el-ella'],
             // Añade más unidades y palabras según sea necesario
         };
 
@@ -177,14 +182,14 @@
         const resolutionDisplay = document.getElementById('resolution');
 
         // Solicitar acceso a la cámara con una resolución de 1080p
-        navigator.mediaDevices.getUserMedia({ 
-            video: { 
+        navigator.mediaDevices.getUserMedia({
+            video: {
                 //width: { ideal: 1920 },
                 //height: { ideal: 1080 }
                 width: { ideal: 1280 },
                 height: { ideal: 720 }
-                
-            } 
+
+            }
         })
         .then(stream => {
             video.srcObject = stream;
@@ -207,7 +212,7 @@
                     // Obtener la palabra seleccionada
                     const selectedWord = document.getElementById('correction-options').value;
                     // Enviar imagen y palabra al evento 'corregir_video_stream'
-                    socket.emit('corregir_video_stream', { palabra: selectedWord, image: dataURL });
+                    socket.emit('corregir_video_stream', { frase: selectedWord, image: dataURL });
                 }
             }, 250); // Intervalo de 250ms entre cuadros
 

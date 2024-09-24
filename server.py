@@ -29,17 +29,24 @@ from geventwebsocket.handler import WebSocketHandler
 
 unidades = {
     "familiares":["hermana", "hijo", "mama", "papa"],
-    "colores": ["amarillo", "negro", "rojo", "verde"]
+    "colores": ["amarillo", "negro", "rojo", "verde"],
+    "pronombres": ["el-ella", "nosotros", "ustedes", "vos", "yo"]
 } 
 
 #---------VARIABLES-------------------
+expected_phrase = []
+current_word_index = 0
+palabra_detectada = None
+activo = True
+correcto = False
+
 # Define constants for the gesture recognition
 PUNTOS_MINIMOS_MANOS = 5
 # Define the confidence threshold
 CONFIDENCE_THRESHOLD = 0.96  # Adjust this value to make the detection stricter
 # Initialize detection counters
 detection_count = defaultdict(int)
-DETECTION_THRESHOLD = 8  # Number of times a prediction must be detected before being added to the sentence
+DETECTION_THRESHOLD = 10  # Number of times a prediction must be detected before being added to the sentence
 # Initialize the lists and queue
 sentence, keypoints, last_prediction, grammar, grammar_result = [], deque(maxlen=4), [], [], []
 activo = False
@@ -123,7 +130,7 @@ def handle_video_stream(data):
     if not img_data:
         print("No se recibió ninguna imagen en el evento 'video_frame'.")
         return  # Salir de la función si no se recibió ninguna imagen
-    
+
     # Procesar la imagen como de costumbre...
     img_bytes = base64.b64decode(img_data.split(',')[1])
     np_arr = np.frombuffer(img_bytes, np.uint8)
@@ -148,7 +155,7 @@ def handle_video_stream(data):
 
     # Extract keypoints and check if there are valid hand landmarks
     keypoints_extracted, valid_hand_landmarks = keypoint_extraction(results, min_hand_landmarks=PUNTOS_MINIMOS_MANOS)  # Ajusta el valor aquí
-    
+
     if valid_hand_landmarks:
         keypoints.append(keypoints_extracted)
 
@@ -209,7 +216,7 @@ def handle_video_stream(data):
         # Apply grammar correction tool and extract the corrected result
         grammar_result = tool.correct(text)
 
-    # Draw the sentence on the image       
+    # Draw the sentence on the image
     if grammar_result:
         # Calculate the size of the text to be displayed and the X coordinate for centering the text on the image
         textsize = cv2.getTextSize(grammar_result, cv2.FONT_HERSHEY_SIMPLEX, 1, 2)[0]
@@ -229,14 +236,14 @@ def handle_video_stream(data):
 
 
     # Mostrar la puntuación de confianza en la imagen
-    cv2.putText(img, f'Confidence: {confidence_score:.2f}', 
+    cv2.putText(img, f'Confidence: {confidence_score:.2f}',
                 (img.shape[1] - 250, img.shape[0] - 20),  # Coordenadas para la posición del texto
                 cv2.FONT_HERSHEY_SIMPLEX,  # Tipo de fuente
                 0.7,  # Escala de la fuente (tamaño)
                 (255, 255, 255),  # Color del texto en formato BGR (blanco)
                 2,  # Grosor del texto
                 cv2.LINE_AA)  # Tipo de línea para el texto (antialiasing)
-    
+
     # Funcionalidad "Deteccion"
     # Agregar el texto "Detección" en el medio y arriba de la imagen
     text = "Detectar"
@@ -262,7 +269,7 @@ def handle_video_stream(data):
     status_line = f"Elapsed time: {elapsed_time:.2f} seconds | Frames processed: {frame_count} | FPS reales: {fps:.2f}"
     # Imprimir en la misma línea sobrescribiendo la anterior
     print(status_line.ljust(80), end='\r', flush=True)
-    
+
 
     # Redimensionar la imagen a 720p antes de enviarla de vuelta al cliente
     img_resized = cv2.resize(img, (1280, 720))  # Redimensionar a 1280x720
@@ -283,177 +290,183 @@ def handle_video_stream(data):
 
     # Emitir la imagen y el tiempo
     emit('processed_frame', data_to_send)
+# Agrega estas variables globales al inicio del script
+expected_phrase = []
+current_word_index = 0
 
 @socketio.on('corregir_video_stream')
 def corregir_video_stream(data):
-    palabra = data.get('palabra')
-    global frame_count, start_time, transmission_active, jpeg,sentence, keypoints, last_prediction, grammar, grammar_result, confidence_score,activo, palabra_detectada,correcto
+    global frame_count, start_time, transmission_active, jpeg, sentence, keypoints, last_prediction, grammar, grammar_result
+    global confidence_score, activo, palabra_detectada, correcto, expected_phrase, current_word_index
+
     start_time_total = time.perf_counter()
 
-    # Detectar si es una nueva transmisión (si no hay frames procesados, es nueva)
+    # Detectar si es una nueva transmisión
     if not transmission_active:
         transmission_active = True
         frame_count = 0
         confidence_score = 0.0
         sentence, keypoints, last_prediction, grammar, grammar_result = [], deque(maxlen=4), [], [], []
         start_time = time.perf_counter()
-    
+        # Resetear variables adicionales
+        activo = True
+        palabra_detectada = None
+        correcto = False
+        expected_phrase = []
+        current_word_index = 0
+
+    # Obtener la frase del cliente y dividirla en palabras si aún no se ha hecho
+    frase = data.get('frase')
+    if frase and not expected_phrase:
+        expected_phrase = frase.split()
+        current_word_index = 0
+        activo = True
+        palabra_detectada = None
+        correcto = False
+        print(f"Frase a corregir: {expected_phrase}")
+
     # Decodificar la imagen recibida del cliente
-    img_bytes = None  # Inicializa img_bytes como None
-    # Decodificar la imagen recibida del cliente directamente con OpenCV
-    if 'image' in data:
-        img_data = data['image']
+    img_data = data.get('image')
+    if img_data:
         img_bytes = base64.b64decode(img_data.split(',')[1])
-    else:
-        print()
-        print("No se recibió ninguna imagen en la transmisión.")
-
-
-    if img_bytes is not None:
         np_arr = np.frombuffer(img_bytes, np.uint8)
         try:
             img = jpeg.decode(np_arr)
         except Exception as e:
-            print()
             print(f"Error al decodificar con TurboJPEG: {str(e)}")
+            return
     else:
-        print()
-        print("No se recibió ninguna imagen.")
+        print("No se recibió ninguna imagen en la transmisión.")
+        return
 
-    # Incrementar el contador de frames
     frame_count += 1
 
-    # Procesar la imagen usando la GPU si está disponible
-    with t.device('/GPU:0'):  # Forzar el uso de la GPU
+    # Procesar la imagen y extraer keypoints
+    with t.device('/GPU:0'):
         results, img = image_process(img, mp_holistic)
         draw_landmarks_with_lines(img, results)
 
+    keypoints_extracted, valid_hand_landmarks = keypoint_extraction(results, min_hand_landmarks=PUNTOS_MINIMOS_MANOS)
 
-    #------------
-    # Corrección depalabras
-
-    # Extract keypoints and check if there are valid hand landmarks
-    keypoints_extracted, valid_hand_landmarks = keypoint_extraction(results, min_hand_landmarks=PUNTOS_MINIMOS_MANOS)  # Ajusta el valor aquí
-    
     if valid_hand_landmarks:
         keypoints.append(keypoints_extracted)
 
-    # Check if 4 frames have been accumulated
+    # Realizar predicción cuando se acumulen suficientes keypoints
     if len(keypoints) == 4:
-        # continue  # Si estás dentro de un bucle y quieres continuar al siguiente ciclo
-        # Convert keypoints deque to a numpy array
         keypoints_array = np.array(keypoints)
-        # Make a prediction on the keypoints using the loaded model
-        with t.device('/GPU:0'):  # Asegurarse de que la GPU se usa para la predicción
-            prediction = model.predict(keypoints_array[np.newaxis, :, :],verbose=0)
+        with t.device('/GPU:0'):
+            prediction = model.predict(keypoints_array[np.newaxis, :, :], verbose=0)
         confidence_score = np.amax(prediction)
-        # Check if the maximum prediction value is above the confidence threshold
         if confidence_score > CONFIDENCE_THRESHOLD:
             predicted_action = actions[np.argmax(prediction)]
             detection_count[predicted_action] += 1
-
-            # Check if the predicted sign is detected enough times
             if detection_count[predicted_action] >= DETECTION_THRESHOLD:
-                # Check if the predicted sign is different from the previously predicted sign
                 if last_prediction != predicted_action:
-                    # Append the predicted sign to the sentence list
                     palabra_detectada = predicted_action
-                    print()
                     print(f"Detectado: {predicted_action}")
-                    # Record a new prediction to use it on the next cycle
                     last_prediction = predicted_action
-                    # Reset the counter for this action
                     detection_count[predicted_action] = 0
-
-    # Verifico si la palabra detectada es igual a la palabra que se debe escribir
-    if (palabra_detectada is not None) and activo:
-        if palabra_detectada == palabra:
-            activo = False
-            correcto = True
+                    keypoints.clear()
+                    activo = False  # Pausar detección hasta que el usuario presione la barra espaciadora
         else:
-            activo = False
-            correcto = False
+            print("Gesto no reconocido")
 
+    # Verificar si la palabra detectada es igual a la palabra esperada
+    if palabra_detectada is not None and not activo:
+        if expected_phrase and current_word_index < len(expected_phrase):
+            palabra_esperada = expected_phrase[current_word_index]
+            if palabra_detectada == palabra_esperada:
+                correcto = True
+                current_word_index += 1
+                print(f"Palabra correcta: {palabra_detectada}")
+            else:
+                correcto = False
+                print(f"Palabra incorrecta: {palabra_detectada} (esperada: {palabra_esperada})")
+        palabra_detectada = None  # Reiniciar la palabra detectada
+
+    # Mostrar mensajes de retroalimentación
     if not activo:
         if correcto:
-            cv2.putText(img, 'Correcto: '+ palabra, (10, 140), cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 255, 0), 2, cv2.LINE_AA)
-            cv2.putText(img, 'Precione barra espaciadora para reintentar', (10, 170), cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 255, 0), 2, cv2.LINE_AA)
+            cv2.putText(img, 'Correcto', (10, 140), cv2.FONT_HERSHEY_SIMPLEX,
+                        0.7, (0, 255, 0), 2, cv2.LINE_AA)
+            cv2.putText(img, 'Presione barra espaciadora para continuar', (10, 170),
+                        cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 255, 0), 2, cv2.LINE_AA)
         else:
-            cv2.putText(img, 'Incorrecto', (10, 140), cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 0, 255), 2, cv2.LINE_AA)
-            cv2.putText(img, 'Precione barra espaciadora para reintentar', (10, 170), cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 0, 255), 2, cv2.LINE_AA)
-            
+            cv2.putText(img, 'Incorrecto', (10, 140), cv2.FONT_HERSHEY_SIMPLEX,
+                        0.7, (0, 0, 255), 2, cv2.LINE_AA)
+            cv2.putText(img, 'Presione barra espaciadora para reintentar', (10, 170),
+                        cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 0, 255), 2, cv2.LINE_AA)
 
-    # Reset if the "Spacebar" is pressed
-    if keyboard.is_pressed(' '):
-        sentence, keypoints, last_prediction, grammar, grammar_result = [], deque(maxlen=4), [], [], []
-        detection_count.clear()
+    # Mostrar la frase y el progreso
+    frase_mostrada = ''
+    for i, palabra in enumerate(expected_phrase):
+        if i < current_word_index:
+            # Palabras ya reconocidas
+            frase_mostrada += palabra + ' '
+        elif i == current_word_index:
+            # Palabra actual a reconocer
+            frase_mostrada += '_ '
+        else:
+            # Palabras pendientes
+            frase_mostrada += '_ '
+
+    cv2.putText(img, frase_mostrada.strip(), (10, 200), cv2.FONT_HERSHEY_SIMPLEX,
+                0.7, (255, 255, 255), 2, cv2.LINE_AA)
 
     # Mostrar la puntuación de confianza en la imagen
-    cv2.putText(img, f'Confidence: {confidence_score:.2f}', 
-                (img.shape[1] - 250, img.shape[0] - 20),  # Coordenadas para la posición del texto
-                cv2.FONT_HERSHEY_SIMPLEX,  # Tipo de fuente
-                0.7,  # Escala de la fuente (tamaño)
-                (255, 255, 255),  # Color del texto en formato BGR (blanco)
-                2,  # Grosor del texto
-                cv2.LINE_AA)  # Tipo de línea para el texto (antialiasing)
-    
-    # Funcionalidad "Deteccion"
-    # Agregar el texto "Detección" en el medio y arriba de la imagen
-    text = "Corregir " + palabra
+    cv2.putText(img, f'Confidence: {confidence_score:.2f}',
+                (img.shape[1] - 250, img.shape[0] - 20),
+                cv2.FONT_HERSHEY_SIMPLEX, 0.7, (255, 255, 255), 2, cv2.LINE_AA)
+
+    # Mostrar la palabra actual a corregir
+    if expected_phrase and current_word_index < len(expected_phrase):
+        text = "Corregir: " + expected_phrase[current_word_index]
+    else:
+        text = "Frase completada"
+
+    # Agregar el texto a la imagen
     font = cv2.FONT_HERSHEY_SIMPLEX
     font_scale = 1
-    color = (0, 255, 0)  # Blanco
+    color = (0, 255, 0)
     thickness = 2
-    # Calcula las coordenadas para centrar el texto
     text_size = cv2.getTextSize(text, font, font_scale, thickness)[0]
     text_x = (img.shape[1] - text_size[0]) // 2
-    text_y = text_size[1] + 10  # Un poco por debajo del borde superior
-    # Inserta el texto en la imagen
+    text_y = text_size[1] + 10
     cv2.putText(img, text, (text_x, text_y), font, font_scale, color, thickness, cv2.LINE_AA)
 
+    # Permitir reintento o continuar al presionar la barra espaciadora
+    if keyboard.is_pressed(' '):
+        activo = True
+        correcto = False
+        palabra_detectada = None
+        detection_count.clear()
+        keypoints.clear()
+        last_prediction = None
 
-    #------------
-    # Calcular el tiempo transcurrido desde que se recibió el primer frame
-    elapsed_time = time.perf_counter() - start_time
-    # Calcular FPS
-    if elapsed_time > 0:
-        fps = frame_count / elapsed_time
-    # Generar la cadena de texto que deseas imprimir
-    status_line = f"Elapsed time: {elapsed_time:.2f} seconds | Frames processed: {frame_count} | FPS reales: {fps:.2f}"
-    # Imprimir en la misma línea sobrescribiendo la anterior
-    print(status_line.ljust(80), end='\r', flush=True)
-    
-
-    # Redimensionar la imagen a 720p antes de enviarla de vuelta al cliente
-    img_resized = cv2.resize(img, (1280, 720))  # Redimensionar a 1280x720
-    # Codificar la imagen procesada para enviarla de vuelta al cliente
-    # Codificación con OPENCV  VIEJO
-    #_, buffer = cv2.imencode('.jpg', img_resized,[int(cv2.IMWRITE_JPEG_QUALITY), 50])
-    # Codificación con TurboJPEG
+    # Enviar la imagen procesada al cliente
+    img_resized = cv2.resize(img, (1280, 720))
     buffer = jpeg.encode(img_resized, quality=50)
     img_base64 = base64.b64encode(buffer).decode('utf-8')
-    # Crear un diccionario con la imagen y el tiempo
     end_time_total = time.perf_counter()
-    # Calcular el tiempo transcurrido
     total_time_time = end_time_total - start_time_total
     data_to_send = {
         'image': 'data:image/jpeg;base64,' + img_base64,
         'total_time_time': total_time_time
     }
-
-    # Emitir la imagen y el tiempo
     emit('processed_frame', data_to_send)
+
 
 @socketio.on('reset_text')
 def handle_reset_text():
-    global sentence, keypoints, last_prediction, grammar, grammar_result, detection_count,activo,palabra_detectada,correcto
-    print()  # Esto mueve el cursor a una nueva línea
+    global sentence, keypoints, last_prediction, grammar, grammar_result, detection_count, activo, palabra_actual_detectada, correcto, expected_phrase, current_word_index
     print("Reseteando textos y predicciones en el servidor.")
     sentence, keypoints, last_prediction, grammar, grammar_result = [], deque(maxlen=4), [], [], []
     detection_count.clear()
     activo = True
-    palabra_detectada = None
+    palabra_actual_detectada = None
     correcto = False
+    expected_phrase = []
+    current_word_index = 0
 
 @socketio.on('disconnect')
 def handle_disconnect():
@@ -481,6 +494,24 @@ def handle_unit_selected(data):
         print(f"Modelo para {unidad} cargado desde {model_path} con acciones {actions}")
     else:
         print("No se recibió una unidad válida.")
+
+@socketio.on('verificar_frase')
+def verificar_frase(data):
+    try:
+        # Obtener la frase recibida del cliente
+        frase_recibida = data.get('frase')
+
+        # Ejemplo de frase correcta (puedes modificarlo según tu lógica)
+        frase_correcta = "mi mama cocina"
+
+        # Verificación de la frase
+        if frase_recibida.lower() == frase_correcta.lower():
+            emit('resultado_frase', {"resultado": "correcto"})
+        else:
+            emit('resultado_frase', {"resultado": "incorrecto"})
+    except Exception as e:
+        logging.error(f"Error al verificar la frase: {str(e)}")
+        emit('resultado_frase', {"error": "Error interno del servidor"})
 
 
 if __name__ == '__main__':
