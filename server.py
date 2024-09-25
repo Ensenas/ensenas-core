@@ -195,7 +195,7 @@ def handle_video_stream(data):
         sentence = sentence[-7:]
 
     # Reset if the "Spacebar" is pressed
-    if keyboard.is_pressed(' '):
+    if keyboard.is_pressed(' ') or data.get('reset'):
         sentence, keypoints, last_prediction, grammar, grammar_result = [], deque(maxlen=4), [], [], []
         detection_count.clear()
 
@@ -446,7 +446,7 @@ def corregir_video_stream(data):
     cv2.putText(img, text, (text_x, text_y), font, font_scale, color, thickness, cv2.LINE_AA)
 
     # Permitir reintento o continuar al presionar la barra espaciadora
-    if keyboard.is_pressed(' '):
+    if keyboard.is_pressed(' ') or data.get('reset'):
         activo = True
         correcto = False
         palabra_detectada = None
