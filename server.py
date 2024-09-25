@@ -116,9 +116,11 @@ def index():
 def handle_video_stream(data):
     global frame_count, start_time, transmission_active, jpeg,sentence, keypoints, last_prediction, grammar, grammar_result, confidence_score
     start_time_total = time.perf_counter()
+    detection_status = "processing"
 
     # Detectar si es una nueva transmisión (si no hay frames procesados, es nueva)
     if not transmission_active:
+        detection_status = "processing"
         transmission_active = True
         frame_count = 0
         confidence_score = 0.0
@@ -183,6 +185,10 @@ def handle_video_stream(data):
                     last_prediction = predicted_action
                     # Reset the counter for this action
                     detection_count[predicted_action] = 0
+                    # Status
+                    detection_status = "passed"
+    else:
+        detection_status = "failed" 
 
     # Limit the sentence length to 7 elements to make sure it fits on the screen
     if len(sentence) > 7:
@@ -283,10 +289,15 @@ def handle_video_stream(data):
     end_time_total = time.perf_counter()
     # Calcular el tiempo transcurrido
     total_time_time = end_time_total - start_time_total
+
+
     data_to_send = {
         'image': 'data:image/jpeg;base64,' + img_base64,
-        'total_time_time': total_time_time
+        'total_time_time': total_time_time,
+        'detection_status': detection_status,  
+        'confidence_score': confidence_score   
     }
+
 
     # Emitir la imagen y el tiempo
     emit('processed_frame', data_to_send)
