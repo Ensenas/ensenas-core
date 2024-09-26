@@ -197,6 +197,7 @@ def handle_video_stream(data):
     # Reset if the "Spacebar" is pressed
     if keyboard.is_pressed(' ') or data.get('reset'):
         sentence, keypoints, last_prediction, grammar, grammar_result = [], deque(maxlen=4), [], [], []
+        detection_status = "processing"  # Resetear el estado al continuar
         detection_count.clear()
 
     # Check if the list is not empty
@@ -309,11 +310,13 @@ current_word_index = 0
 def corregir_video_stream(data):
     global frame_count, start_time, transmission_active, jpeg, sentence, keypoints, last_prediction, grammar, grammar_result
     global confidence_score, activo, palabra_detectada, correcto, expected_phrase, current_word_index
+    detection_status = "processing"
 
     start_time_total = time.perf_counter()
 
     # Detectar si es una nueva transmisión
     if not transmission_active:
+        detection_status = "processing"
         transmission_active = True
         frame_count = 0
         confidence_score = 0.0
@@ -390,9 +393,11 @@ def corregir_video_stream(data):
                 correcto = True
                 current_word_index += 1
                 print(f"Palabra correcta: {palabra_detectada}")
+                detection_status = "passed"  
             else:
                 correcto = False
                 print(f"Palabra incorrecta: {palabra_detectada} (esperada: {palabra_esperada})")
+                detection_status = "failed"  # Estado de falla
         palabra_detectada = None  # Reiniciar la palabra detectada
 
     # Mostrar mensajes de retroalimentación
@@ -453,6 +458,7 @@ def corregir_video_stream(data):
         detection_count.clear()
         keypoints.clear()
         last_prediction = None
+        detection_status = "processing"  # Resetear el estado al continuar
 
     # Enviar la imagen procesada al cliente
     img_resized = cv2.resize(img, (1280, 720))
@@ -462,7 +468,8 @@ def corregir_video_stream(data):
     total_time_time = end_time_total - start_time_total
     data_to_send = {
         'image': 'data:image/jpeg;base64,' + img_base64,
-        'total_time_time': total_time_time
+        'total_time_time': total_time_time,
+        "detection_status": detection_status
     }
     emit('processed_frame', data_to_send)
 
