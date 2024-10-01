@@ -11,7 +11,6 @@
             height: auto;
             margin-top: 0;
         }
-
         #localVideo {
             position: absolute;
             top: 10px;
@@ -20,7 +19,6 @@
             height: auto;
             border: 2px solid #000;
         }
-
         #local-video-label {
             position: absolute;
             top: 220px; /* Coloca debajo del video */
@@ -29,7 +27,6 @@
             color: #000;
             margin-top: 0;
         }
-
         #selectors-container {
             position: absolute;
             left: 10px;
@@ -39,7 +36,6 @@
             border-radius: 8px;
             margin-top: 0;
         }
-
         #output {
             display: block;
             margin: 0 auto 0;
@@ -47,11 +43,9 @@
             height: auto;
             border: 2px solid #000;
         }
-
         h1 {
             text-align: center;
         }
-
         #fpsDisplay {
             position: absolute;
             top: 10px;
@@ -64,7 +58,6 @@
 <body>
     <h1>Video Stream Remoto</h1>
     <div id="fpsDisplay"></div>
-
     <div id="image-container">
         <video id="localVideo" autoplay playsinline></video>
         <div id="local-video-label">Local Video Stream</div>
@@ -72,9 +65,6 @@
             <select id="unit-selector">
                 <option value="familiares">Familiares</option>
                 <option value="colores">Colores</option>
-                <option value="pronombres">Pronombres</option>
-                <option value="frases">Frases</option>
-
                 <!-- Añade más opciones según sea necesario -->
             </select>
             <select id="mode-selector">
@@ -84,14 +74,11 @@
             <select id="correction-options" style="display:none;">
                 <!-- Las opciones se rellenarán dinámicamente -->
             </select>
-
         </div>
     </div>
-
     <canvas id="processedVideo" style="display:none;"></canvas>
     <img id="output" alt="Processed Video Stream">
     <div id="resolution"></div>
-
     <script src="https://cdn.socket.io/4.0.0/socket.io.min.js"></script>
     <script>
         const unitWords = {
@@ -100,11 +87,9 @@
             pronombres:['yo', 'vos', 'el-ella', 'nosotros', 'ustedes', 'yo vos el-ella'],
             // Añade más unidades y palabras según sea necesario
         };
-
         function updateWordsForUnit(unit) {
             const correctionOptions = document.getElementById('correction-options');
             correctionOptions.innerHTML = ''; // Limpiar las opciones actuales
-
             // Añadir las nuevas opciones según la unidad seleccionada
             unitWords[unit].forEach(word => {
                 const option = document.createElement('option');
@@ -113,13 +98,11 @@
                 correctionOptions.appendChild(option);
             });
         }
-
         document.getElementById('unit-selector').addEventListener('change', function() {
             const selectedUnit = this.value;
             socket.emit('unit_selected', { unidad: selectedUnit });
             updateWordsForUnit(selectedUnit); // Actualizar las palabras para la unidad seleccionada
         });
-
         document.getElementById('mode-selector').addEventListener('change', function() {
             toggleCorrectionOptions(); // Actualiza la visibilidad de las opciones
             const mode = this.value;
@@ -129,7 +112,6 @@
                 startDetection();
             }
         });
-
         document.addEventListener('DOMContentLoaded', function() {
             const initialUnit = document.getElementById('unit-selector').value;
             updateWordsForUnit(initialUnit); // Actualizar las palabras para la unidad seleccionada
@@ -137,23 +119,19 @@
         });
         const socket = io('wss://alarma.mywire.org:3051');
         let mode = 'Detectar';  // Valor inicial, puede cambiarse a 'Corregir' según la selección
-
         function toggleCorrectionOptions() {
             const modeSelector = document.getElementById('mode-selector');
             const correctionOptions = document.getElementById('correction-options');
-
             if (modeSelector.value === 'Corregir') {
                 correctionOptions.style.display = 'block';
             } else {
                 correctionOptions.style.display = 'none';
             }
         }
-
         function startDetection() {
             mode = 'Detectar';  // Establece el modo en 'Detectar'
             socket.emit('reset_text')
         }
-
         function startCorrection() {
             mode = 'Corregir';  // Establece el modo en 'Corregir'
             socket.emit('reset_text')
@@ -167,20 +145,16 @@
                 startDetection();
             }
         });
-
         document.getElementById('correction-options').addEventListener('change', function() {
             startCorrection(); // Llamar a la corrección cuando se cambie la palabra seleccionada
         });
-
         // Inicialización para asegurarse de que las opciones correctas estén visibles al cargar la página
         toggleCorrectionOptions();
-
         const video = document.getElementById('localVideo');
         const output = document.getElementById('output');
         const canvas = document.getElementById('processedVideo');
         const context = canvas.getContext('2d');
         const resolutionDisplay = document.getElementById('resolution');
-
         // Solicitar acceso a la cámara con una resolución de 1080p
         navigator.mediaDevices.getUserMedia({
             video: {
@@ -194,11 +168,9 @@
         .then(stream => {
             video.srcObject = stream;
             video.play();
-
             video.onloadedmetadata = () => {
                 resolutionDisplay.textContent = `Resolución: ${video.videoWidth}x${video.videoHeight}`;
             };
-
             setInterval(() => {
                 canvas.width = video.videoWidth;
                 canvas.height = video.videoHeight;
