@@ -24,16 +24,20 @@ from turbojpeg import TurboJPEG
 from collections import deque, defaultdict
 from gevent import pywsgi
 from geventwebsocket.handler import WebSocketHandler
-
-
+from flask_cors import CORS
 
 unidades = {
-    "familiares":["hermana", "hijo", "mama", "papa"],
+    "familiares": ["hermana", "hijo", "mamá", "papá"],
     "colores": ["amarillo", "negro", "rojo", "verde"],
-    "pronombres": ["el-ella", "nosotros", "ustedes", "vos", "yo"]
-} 
+    "pronombres": ["el-ella", "nosotros", "ustedes", "vos", "yo"],
+    "saludos": ["chau", "hola"],
+    "frases_i": ["el-ella", "hambre", "medico", "mi", "tener", "trabajar", "yo"],
+    "frases_ii": ["color", "estudiar", "favorito", "hermana", "mi", "rojo", "universidad"],
+    "all_in_one": ["amarillo", "chau", "color", "el-ella", "estudiar", "favorito", "hambre", "hermana", "hijo",
+                   "hola", "mamá", "medico", "mi", "negro", "nosotros", "papá", "rojo", "trabajar", "universidad",
+                   "ustedes", "vos", "yo"]}
 
-#---------VARIABLES-------------------
+# ---------VARIABLES-------------------
 expected_phrase = []
 current_word_index = 0
 palabra_detectada = None
@@ -43,22 +47,24 @@ correcto = False
 # Define constants for the gesture recognition
 PUNTOS_MINIMOS_MANOS = 5
 # Define the confidence threshold
-CONFIDENCE_THRESHOLD = 0.96  # Adjust this value to make the detection stricter
+CONFIDENCE_THRESHOLD = 0.92  # Adjust this value to make the detection stricter
 # Initialize detection counters
 detection_count = defaultdict(int)
 DETECTION_THRESHOLD = 10  # Number of times a prediction must be detected before being added to the sentence
 # Initialize the lists and queue
 sentence, keypoints, last_prediction, grammar, grammar_result = [], deque(maxlen=4), [], [], []
 activo = False
-palabra_detectada =  None
-correcto =False
+palabra_detectada = None
+correcto = False
 # Set the path to the data directory
 PATH = os.path.join('data_remote')
 # Create an array of action labels by listing the contents of the data directory
 actions = unidades['familiares']
-#---------FIN VARIABLES-------------------
+# ---------FIN VARIABLES-------------------
 # Configurar el logging
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
+
+
 def handle_exception(exc_type, exc_value, exc_traceback):
     # Verificar si la excepción es un SSLError con "wrong version number"
     if issubclass(exc_type, ssl.SSLError) and "wrong version number" in str(exc_value):
@@ -66,11 +72,13 @@ def handle_exception(exc_type, exc_value, exc_traceback):
     else:
         logging.error("Uncaught exception", exc_info=(exc_type, exc_value, exc_traceback))
 
+
 # Establecer el manejador de excepciones global
 sys.excepthook = handle_exception
 app = Flask(__name__)
+CORS(app)
 socketio = SocketIO(app, async_mode='gevent', cors_allowed_origins="*", ping_timeout=20, ping_interval=5)
-jpeg = TurboJPEG("C:/Facultad/Proyecto/ensenas-core/venv/Lib/site-packages/PyTurboJPEG-1.7.6.dist-info/libjpeg-turbo-gcc64/bin/libturbojpeg.dll")
+jpeg = TurboJPEG()
 # Create an instance of the grammar correction tool for Spanish (Argentina)
 tool = language_tool_python.LanguageToolPublicAPI('es-AR')
 # Initialize the confidence score
@@ -81,7 +89,9 @@ print("Num GPUs Available: ", len(t.config.experimental.list_physical_devices('G
 
 # Cargar el modelo previamente entrenado
 with t.device('/GPU:0'):  # Forzar el uso de la GPU al cargar el modelo
+    dummy_input = np.zeros((1, 4, 165))  # Tamaño según el input que espera tu modelo
     model = load_model('models/familiares_model.h5')
+    model.predict(dummy_input, verbose=0)
 
 # Inicializa Mediapipe y el modelo de procesamiento
 mp_holistic = mp.solutions.holistic.Holistic(
@@ -112,9 +122,32 @@ def index():
     print(f"Connected at {current_time} from IP: {client_ip} processing a new connection...")
     return render_template('index_new.html')
 
+
+@app.route('/unit_selected', methods=['POST'])
+def handle_unit_selected_http():
+    global model, actions  # Asegúrate de que estas variables sean globales
+    data = request.get_json()  # Obtener los datos JSON del cliente
+    unidad = data.get('unidad')  # Obtener la unidad seleccionada
+
+    if unidad:
+        model_path = f'models/{unidad}_model.h5'
+        actions = unidades[unidad]  # Asegúrate de tener los archivos de acciones predefinidos
+
+        # Cargar el modelo correspondiente
+        with t.device('/GPU:0'):  # Usar la GPU si está disponible
+            dummy_input = np.zeros((1, 4, 165))  # Tamaño según el input que espera tu modelo
+            model = load_model(model_path)
+            model.predict(dummy_input, verbose=0)
+
+        print(f"Modelo para {unidad} cargado desde {model_path} con acciones {actions}")
+        return {"status": "success", "message": f"Modelo {unidad} cargado correctamente."}, 200
+    else:
+        return {"status": "error", "message": "Unidad no válida."}, 400
+
+
 @socketio.on('video_frame')
 def handle_video_stream(data):
-    global frame_count, start_time, transmission_active, jpeg,sentence, keypoints, last_prediction, grammar, grammar_result, confidence_score
+    global frame_count, start_time, transmission_active, jpeg, sentence, keypoints, last_prediction, grammar, grammar_result, confidence_score
     start_time_total = time.perf_counter()
     detection_status = "processing"
 
@@ -151,24 +184,25 @@ def handle_video_stream(data):
         results, img = image_process(img, mp_holistic)
         draw_landmarks_with_lines(img, results)
 
-
-    #------------
+    # ------------
     # Deteccion de palabras
 
     # Extract keypoints and check if there are valid hand landmarks
-    keypoints_extracted, valid_hand_landmarks = keypoint_extraction(results, min_hand_landmarks=PUNTOS_MINIMOS_MANOS)  # Ajusta el valor aquí
+    keypoints_extracted, valid_hand_landmarks = keypoint_extraction(results,
+                                                                    min_hand_landmarks=PUNTOS_MINIMOS_MANOS)  # Ajusta el valor aquí
 
     if valid_hand_landmarks:
         keypoints.append(keypoints_extracted)
 
     # Check if 4 frames have been accumulated
-    if len(keypoints) == 4:
+    if len(keypoints) == 10:
         # continue  # Si estás dentro de un bucle y quieres continuar al siguiente ciclo
         # Convert keypoints deque to a numpy array
         keypoints_array = np.array(keypoints)
         # Make a prediction on the keypoints using the loaded model
         with t.device('/GPU:0'):  # Asegurarse de que la GPU se usa para la predicción
-            prediction = model.predict(keypoints_array[np.newaxis, :, :],verbose=0)
+            prediction = model.predict(keypoints_array[np.newaxis, :, :], verbose=0)
+
         confidence_score = np.amax(prediction)
         # Check if the maximum prediction value is above the confidence threshold
         if confidence_score > CONFIDENCE_THRESHOLD:
@@ -188,9 +222,9 @@ def handle_video_stream(data):
                     # Status
                     detection_status = "passed"
     else:
-        detection_status = "failed" 
+        detection_status = "failed"
 
-    # Limit the sentence length to 7 elements to make sure it fits on the screen
+        # Limit the sentence length to 7 elements to make sure it fits on the screen
     if len(sentence) > 7:
         sentence = sentence[-7:]
 
@@ -210,7 +244,8 @@ def handle_video_stream(data):
         # Check if the last element of the sentence belongs to the alphabet (lower or upper cases)
         if sentence[-1] in string.ascii_lowercase or sentence[-1] in string.ascii_uppercase:
             # Check if the second last element of sentence belongs to the alphabet or is a new word
-            if sentence[-2] in string.ascii_lowercase or sentence[-2] in string.ascii_uppercase or (sentence[-2] not in actions and sentence[-2] not in list(x.capitalize() for x in actions)):
+            if sentence[-2] in string.ascii_lowercase or sentence[-2] in string.ascii_uppercase or (
+                    sentence[-2] not in actions and sentence[-2] not in list(x.capitalize() for x in actions)):
                 # Combine last two elements
                 sentence[-1] = sentence[-2] + sentence[-1]
                 sentence.pop(len(sentence) - 2)
@@ -241,7 +276,6 @@ def handle_video_stream(data):
         cv2.putText(img, ' '.join(sentence), (text_X_coord, 470),
                     cv2.FONT_HERSHEY_SIMPLEX, 1, (255, 255, 255), 2, cv2.LINE_AA)
 
-
     # Mostrar la puntuación de confianza en la imagen
     cv2.putText(img, f'Confidence: {confidence_score:.2f}',
                 (img.shape[1] - 250, img.shape[0] - 20),  # Coordenadas para la posición del texto
@@ -265,8 +299,7 @@ def handle_video_stream(data):
     # Inserta el texto en la imagen
     cv2.putText(img, text, (text_x, text_y), font, font_scale, color, thickness, cv2.LINE_AA)
 
-
-    #------------
+    # ------------
     # Calcular el tiempo transcurrido desde que se recibió el primer frame
     elapsed_time = time.perf_counter() - start_time
     # Calcular FPS
@@ -277,12 +310,11 @@ def handle_video_stream(data):
     # Imprimir en la misma línea sobrescribiendo la anterior
     print(status_line.ljust(80), end='\r', flush=True)
 
-
     # Redimensionar la imagen a 720p antes de enviarla de vuelta al cliente
     img_resized = cv2.resize(img, (1280, 720))  # Redimensionar a 1280x720
     # Codificar la imagen procesada para enviarla de vuelta al cliente
     # Codificación con OPENCV  VIEJO
-    #_, buffer = cv2.imencode('.jpg', img_resized,[int(cv2.IMWRITE_JPEG_QUALITY), 50])
+    # _, buffer = cv2.imencode('.jpg', img_resized,[int(cv2.IMWRITE_JPEG_QUALITY), 50])
     # Codificación con TurboJPEG
     buffer = jpeg.encode(img_resized, quality=50)
     img_base64 = base64.b64encode(buffer).decode('utf-8')
@@ -291,27 +323,27 @@ def handle_video_stream(data):
     # Calcular el tiempo transcurrido
     total_time_time = end_time_total - start_time_total
 
-
     data_to_send = {
         'image': 'data:image/jpeg;base64,' + img_base64,
         'total_time_time': total_time_time,
-        'detection_status': detection_status,  
-        'confidence_score': confidence_score   
+        # 'detection_status': detection_status,
+        # 'confidence_score': confidence_score
     }
-
-
     # Emitir la imagen y el tiempo
     emit('processed_frame', data_to_send)
+
+
 # Agrega estas variables globales al inicio del script
 expected_phrase = []
 current_word_index = 0
+
 
 @socketio.on('corregir_video_stream')
 def corregir_video_stream(data):
     global frame_count, start_time, transmission_active, jpeg, sentence, keypoints, last_prediction, grammar, grammar_result
     global confidence_score, activo, palabra_detectada, correcto, expected_phrase, current_word_index
     detection_status = "processing"
-
+    palabra_a_enviar = None
     start_time_total = time.perf_counter()
 
     # Detectar si es una nueva transmisión
@@ -393,11 +425,12 @@ def corregir_video_stream(data):
                 correcto = True
                 current_word_index += 1
                 print(f"Palabra correcta: {palabra_detectada}")
-                detection_status = "passed"  
+                detection_status = "passed"
             else:
                 correcto = False
                 print(f"Palabra incorrecta: {palabra_detectada} (esperada: {palabra_esperada})")
                 detection_status = "failed"  # Estado de falla
+        palabra_a_enviar = palabra_detectada
         palabra_detectada = None  # Reiniciar la palabra detectada
 
     # Mostrar mensajes de retroalimentación
@@ -469,7 +502,8 @@ def corregir_video_stream(data):
     data_to_send = {
         'image': 'data:image/jpeg;base64,' + img_base64,
         'total_time_time': total_time_time,
-        "detection_status": detection_status
+        'detection_status': detection_status,
+        'palabra_detectada': palabra_a_enviar
     }
     emit('processed_frame', data_to_send)
 
@@ -486,6 +520,7 @@ def handle_reset_text():
     expected_phrase = []
     current_word_index = 0
 
+
 @socketio.on('disconnect')
 def handle_disconnect():
     global transmission_active
@@ -496,22 +531,24 @@ def handle_disconnect():
     print()
     print(f"Transmission ended at {current_time}. Waiting for a new connection...")
 
+
 @socketio.on('unit_selected')
 def handle_unit_selected(data):
     global model, actions  # Asegúrate de que estas variables son globales para poder acceder a ellas
     unidad = data.get('unidad')
-    
+
     if unidad:
         model_path = f'models/{unidad}_model.h5'
-        actions = unidades[unidad]   # Asegúrate de tener los archivos de acciones predefinidos
-        
+        actions = unidades[unidad]  # Asegúrate de tener los archivos de acciones predefinidos
+
         # Cargar el modelo correspondiente
         with t.device('/GPU:0'):  # Usar la GPU si está disponible
             model = load_model(model_path)
-        
+
         print(f"Modelo para {unidad} cargado desde {model_path} con acciones {actions}")
     else:
         print("No se recibió una unidad válida.")
+
 
 @socketio.on('verificar_frase')
 def verificar_frase(data):
@@ -535,14 +572,14 @@ def verificar_frase(data):
 if __name__ == '__main__':
     # Configuración del servidor SSL con gevent
     server = pywsgi.WSGIServer(
-        ('0.0.0.0', 3051),
-        app, 
+        ('0.0.0.0', 3050),
+        app,
         handler_class=WebSocketHandler,
         keyfile='privkey.pem',  # Ruta completa al archivo privkey.pem
         certfile='fullchain.pem',  # Ruta completa al archivo fullchain.pem
         ssl_version=ssl.PROTOCOL_TLS  # Usar TLS en lugar de SSLv3
-        #keyfile='key.pem',
-        #certfile='cert.pem',
-        #ssl_version=ssl.PROTOCOL_TLS  # Usar TLS en lugar de SSLv3
+        # keyfile='key.pem',
+        # certfile='cert.pem',
+        # ssl_version=ssl.PROTOCOL_TLS  # Usar TLS en lugar de SSLv3
     )
     server.serve_forever()
